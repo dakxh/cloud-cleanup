@@ -34,9 +34,13 @@ jobs:
           mkdir -p weights
           huggingface-cli download sczhou/ProPainter --local-dir weights
 
-      - name: 📥 Download User Payload
+      - name: 📥 Download Payload (Public Read)
         run: |
-          wget -O payload.zip "${{ github.event.client_payload.zip_url }}"
+          echo "Starting Job ID: ${{ github.event.client_payload.job_id }}"
+          
+          # Native CLI call to pull from the Bucket
+          hf buckets cp "${{ github.event.client_payload.zip_url }}" payload.zip
+          
           unzip payload.zip -d workspace/
           cp runner.py workspace/
 
