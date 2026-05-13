@@ -26,21 +26,19 @@ jobs:
           
       - name: 📥 Clone ProPainter & Weights
         run: |
-          # Clone the official repo
           git clone https://github.com/sczhou/ProPainter.git
-          
-          # Download the required weights using Hugging Face CLI
           cd ProPainter
           mkdir -p weights
-          huggingface-cli download sczhou/ProPainter --local-dir weights
+          # Fix: Replaced deprecated huggingface-cli with 'hf download'
+          hf download sczhou/ProPainter --local-dir weights
 
-      - name: 📥 Download Payload (Public Read)
+      - name: 📥 Download User Payload
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           echo "Starting Job ID: ${{ github.event.client_payload.job_id }}"
-          
-          # Native CLI call to pull from the Bucket
+          # Fix: Natively download from the bucket using the hf:// scheme
           hf buckets cp "${{ github.event.client_payload.zip_url }}" payload.zip
-          
           unzip payload.zip -d workspace/
           cp runner.py workspace/
 
@@ -51,21 +49,18 @@ jobs:
 
       - name: 📤 Secure Upload Final Video
         env:
+          # hf CLI automatically detects this environment variable
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli upload \
-            nookaharsha/temp \
+          # Fix: Natively upload the final render back into the bucket
+          hf buckets cp \
             workspace/final_healed.mp4 \
-            ${{ github.event.client_payload.job_id }}/final_healed.mp4 \
-            --repo-type dataset \
-            --token $HF_TOKEN
+            hf://buckets/nookaharsha/temp/${{ github.event.client_payload.job_id }}/final_healed.mp4
             
       - name: 🧹 Cleanup Staging Payload
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli delete-file \
-            ${{ github.event.client_payload.job_id }}.zip \
-            --repo-id nookaharsha/temp \
-            --repo-type dataset \
-            --token $HF_TOKEN
+          # Fix: Natively delete the massive zip file from the bucket to save space
+          hf buckets rm \
+            hf://buckets/nookaharsha/temp/${{ github.event.client_payload.job_id }}.zip
