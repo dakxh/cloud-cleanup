@@ -2,13 +2,13 @@ import os
 import json
 import subprocess
 import shutil
+import glob
 
 def process_job():
-    print("Starting Spot Healing Render Pipeline...")
+    print("Starting ProPainter Temporal Pipeline...")
     
-    # 1. Read the Blueprint
     if not os.path.exists("manifest.json"):
-        raise FileNotFoundError("manifest.json not found in the payload.")
+        raise FileNotFoundError("manifest.json not found.")
         
     with open("manifest.json", "r") as f:
         manifest = json.load(f)
@@ -17,76 +17,78 @@ def process_job():
     fps = manifest.get("fps", 30.0)
     process_range = manifest.get("processing_range", [0, manifest.get("total_frames", 0)])
     
-    # Setup directories
     os.makedirs("raw_frames", exist_ok=True)
     os.makedirs("output_frames", exist_ok=True)
 
-    # 2. Extract Frames & Audio
+    # 1. Extract Frames & Audio
     print(f"Extracting frames from {target_video}...")
     subprocess.run(["ffmpeg", "-y", "-i", target_video, "-start_number", "0", "raw_frames/frame_%04d.png"], check=True)
     
-    print("Extracting original audio track...")
     has_audio = False
     try:
         subprocess.run(["ffmpeg", "-y", "-i", target_video, "-vn", "-c:a", "aac", "source_audio.aac"], check=True, stderr=subprocess.DEVNULL)
-        if os.path.exists("source_audio.aac"):
-            has_audio = True
+        if os.path.exists("source_audio.aac"): has_audio = True
     except subprocess.CalledProcessError:
-        print("No audio track found or extraction failed. Proceeding without audio.")
+        pass
 
-    # 3. The AI Processing Loop
-    print(f"Processing frames within range: {process_range[0]} to {process_range[1]}")
+    # 2. Stage Frames for ProPainter
+    # ProPainter expects a folder of frames and a folder of matching masks.
+    print(f"Isolating targeted frames: {process_range[0]} to {process_range[1]}")
+    pp_frames_dir = "../ProPainter/inputs/target_seq/frames"
+    pp_masks_dir = "../ProPainter/inputs/target_seq/masks"
+    os.makedirs(pp_frames_dir, exist_ok=True)
+    os.makedirs(pp_masks_dir, exist_ok=True)
+
     total_frames = manifest.get("total_frames", len(os.listdir("raw_frames")))
     
     for i in range(total_frames):
-        raw_frame_path = f"raw_frames/frame_{i:04d}.png"
-        out_frame_path = f"output_frames/frame_{i:04d}.png"
-        mask_path = f"masks/mask_{i:04d}.png"
+        raw = f"raw_frames/frame_{i:04d}.png"
+        out = f"output_frames/frame_{i:04d}.png"
+        mask = f"masks/mask_{i:04d}.png"
         
-        # If the frame is outside the tracked range, or has no mask, just copy it to save compute
-        if i < process_range[0] or i > process_range[1] or not os.path.exists(mask_path):
-            shutil.copy2(raw_frame_path, out_frame_path)
-            continue
-            
-        print(f"Applying AI Inpainting to frame {i}...")
-        # ---------------------------------------------------------------------
-        # AI INTEGRATION POINT
-        # Here is where you drop in your chosen Video Inpainting model inference.
-        # Example (Pseudo-code):
-        # 
-        # from your_ai_library import run_temporal_inpaint
-        # run_temporal_inpaint(image_path=raw_frame_path, mask_path=mask_path, output_path=out_frame_path)
-        # 
-        # For now, we simulate the output by just copying the original frame.
-        # ---------------------------------------------------------------------
-        shutil.copy2(raw_frame_path, out_frame_path)
+        # If outside the range, bypass the AI to save hours of compute
+        if i < process_range[0] or i > process_range[1] or not os.path.exists(mask):
+            shutil.copy2(raw, out)
+        else:
+            # Copy to ProPainter's staging area
+            shutil.copy2(raw, os.path.join(pp_frames_dir, f"{i:05d}.png"))
+            shutil.copy2(mask, os.path.join(pp_masks_dir, f"{i:05d}.png"))
 
-    # 4. Final HLS/MP4 Compilation
-    print("Muxing final video...")
+    # 3. Execute ProPainter Inference
+    print("Executing ProPainter Spatial-Temporal Inpainting...")
+    print("WARNING: This will take significant time on a CPU.")
+    
+    # We constrain the sub_video_length to prevent the GitHub runner from running out of memory.
     cmd = [
-        "ffmpeg", "-y", 
-        "-framerate", str(fps), 
-        "-start_number", "0", 
-        "-i", "output_frames/frame_%04d.png"
+        "python", "../ProPainter/inference_propainter.py",
+        "--video", pp_frames_dir,
+        "--mask", pp_masks_dir,
+        "--output", "../ProPainter/results",
+        "--sub_video_length", "10", # CRITICAL: Keeps RAM usage under the 7GB GitHub limit
+        "--fp16" # Attempts half-precision to speed up processing
     ]
+    subprocess.run(cmd, check=True)
+
+    # 4. Retrieve Healed Frames
+    print("Integrating healed frames back into the timeline...")
+    healed_dir = "../ProPainter/results/target_seq/out"
     
-    if has_audio:
-        cmd.extend(["-i", "source_audio.aac"])
-        
-    cmd.extend([
-        "-c:v", "libx264", 
-        "-crf", "15", 
-        "-preset", "fast", 
-        "-pix_fmt", "yuv420p"
-    ])
-    
-    if has_audio:
-        cmd.extend(["-c:a", "copy", "-shortest"])
-        
+    if os.path.exists(healed_dir):
+        for healed_frame in glob.glob(os.path.join(healed_dir, "*.png")):
+            filename = os.path.basename(healed_frame)
+            idx = int(filename.split('.')[0])
+            shutil.copy2(healed_frame, f"output_frames/frame_{idx:04d}.png")
+
+    # 5. Mux Final Video
+    print("Muxing final high-fidelity video...")
+    cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-start_number", "0", "-i", "output_frames/frame_%04d.png"]
+    if has_audio: cmd.extend(["-i", "source_audio.aac"])
+    cmd.extend(["-c:v", "libx264", "-crf", "15", "-preset", "fast", "-pix_fmt", "yuv420p"])
+    if has_audio: cmd.extend(["-c:a", "copy", "-shortest"])
     cmd.append("final_healed.mp4")
     
     subprocess.run(cmd, check=True)
-    print("Pipeline Complete: final_healed.mp4 generated.")
+    print("ProPainter Pipeline Complete.")
 
 if __name__ == "__main__":
     process_job()
