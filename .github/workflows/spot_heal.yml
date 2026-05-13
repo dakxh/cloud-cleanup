@@ -22,7 +22,7 @@ jobs:
         run: |
           # Install CPU-only PyTorch to save massive amounts of time and space
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install opencv-python-headless numpy huggingface_hub scipy tqdm imageio einops
+          pip install opencv-python-headless numpy huggingface_hub scipy matplotlib tqdm imageio einops
           
       - name: 📥 Clone ProPainter & Weights
         run: |
