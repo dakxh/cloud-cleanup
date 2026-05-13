@@ -58,15 +58,17 @@ def process_job():
     print("Executing ProPainter Spatial-Temporal Inpainting...")
     print("WARNING: This will take significant time on a CPU.")
     
-    # We constrain the sub_video_length to prevent the GitHub runner from running out of memory.
+    # By changing the working directory, we use relative paths inside ProPainter
     cmd = [
-        "python", "../ProPainter/inference_propainter.py",
-        "--video", pp_frames_dir,
-        "--mask", pp_masks_dir,
-        "--output", "../ProPainter/results",
+        "python", "inference_propainter.py",
+        "--video", "inputs/target_seq/frames",
+        "--mask", "inputs/target_seq/masks",
+        "--output", "results",
         "--sub_video_length", "10"
     ]
-    subprocess.run(cmd, check=True)
+    
+    # CRITICAL FIX: Add cwd="../ProPainter" so the script can find the 'weights' folder
+    subprocess.run(cmd, cwd="../ProPainter", check=True)
 
     # 4. Retrieve Healed Frames
     print("Integrating healed frames back into the timeline...")
