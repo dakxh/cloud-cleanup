@@ -64,7 +64,7 @@ def process_job():
         "--video", "inputs/target_seq/frames",
         "--mask", "inputs/target_seq/masks",
         "--output", "results",
-        "--sub_video_length", "10"
+        "--subvideo_length", "10"
     ]
     
     # CRITICAL FIX: Add cwd="../ProPainter" so the script can find the 'weights' folder
