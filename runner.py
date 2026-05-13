@@ -64,8 +64,7 @@ def process_job():
         "--video", pp_frames_dir,
         "--mask", pp_masks_dir,
         "--output", "../ProPainter/results",
-        "--sub_video_length", "10", # CRITICAL: Keeps RAM usage under the 7GB GitHub limit
-        "--fp16" # Attempts half-precision to speed up processing
+        "--sub_video_length", "10"
     ]
     subprocess.run(cmd, check=True)
 
