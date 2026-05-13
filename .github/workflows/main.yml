@@ -1,0 +1,64 @@
+name: Spot Healing Cloud Runner
+
+on:
+  repository_dispatch:
+    types: [heal_video]
+
+jobs:
+  render-spot-healing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Download Payload (Public Read)
+        run: |
+          echo "Starting Job ID: ${{ github.event.client_payload.job_id }}"
+          echo "Downloading from: ${{ github.event.client_payload.zip_url }}"
+          
+          # 1. Download the zip directly from your public bucket
+          wget -O payload.zip "${{ github.event.client_payload.zip_url }}"
+          
+          # 2. Extract into a clean workspace
+          unzip payload.zip -d workspace/
+          
+      - name: ⚙️ Reconstruct Frames & Run AI 
+        run: |
+          cd workspace
+          # ---------------------------------------------------------
+          # THIS IS THE COMPUTE PHASE
+          # 1. FFmpeg extracts frames from source_video.mp4
+          # 2. The temporal inpainting model processes the frames based on manifest.json
+          # 3. FFmpeg stitches it back together with audio
+          # ---------------------------------------------------------
+          
+          # Simulating the final output for the sake of the handoff
+          mkdir -p output
+          echo "Simulated video data" > output/final_healed.mp4
+
+      - name: 📤 Secure Upload to Hugging Face
+        env:
+          # Inject the encrypted secret into the runner environment
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Install the Hugging Face CLI
+          pip install -U "huggingface_hub[cli]"
+          
+          # Upload the final video back to nookaharsha/temp
+          # It stores it under the specific Job ID folder so it doesn't overwrite anything
+          huggingface-cli upload \
+            nookaharsha/temp \
+            workspace/output/final_healed.mp4 \
+            ${{ github.event.client_payload.job_id }}/final_healed.mp4 \
+            --repo-type dataset \
+            --token $HF_TOKEN
+            
+      - name: 🧹 Optional Bucket Cleanup
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # If you want to save space, delete the massive payload.zip from the bucket 
+          # now that the final video is uploaded.
+          huggingface-cli delete-file \
+            ${{ github.event.client_payload.job_id }}.zip \
+            --repo-id nookaharsha/temp \
+            --repo-type dataset \
+            --token $HF_TOKEN
