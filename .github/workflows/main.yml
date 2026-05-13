@@ -6,57 +6,55 @@ on:
 
 jobs:
   render-spot-healing:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Pinning to Ubuntu 24.04 for stable FFmpeg/Python environments
 
     steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        # We need to checkout the repo so the runner has access to runner.py
+
+      - name: ⚙️ Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip wget
+          python -m pip install --upgrade pip
+          # Add any PyTorch or specific AI libraries your model needs here
+          pip install opencv-python-headless numpy huggingface_hub
+
       - name: 📥 Download Payload (Public Read)
         run: |
           echo "Starting Job ID: ${{ github.event.client_payload.job_id }}"
-          echo "Downloading from: ${{ github.event.client_payload.zip_url }}"
-          
-          # 1. Download the zip directly from your public bucket
+          # Download the zip directly from your public Hugging Face bucket
           wget -O payload.zip "${{ github.event.client_payload.zip_url }}"
           
-          # 2. Extract into a clean workspace
+          # Extract into a clean workspace
           unzip payload.zip -d workspace/
           
-      - name: ⚙️ Reconstruct Frames & Run AI 
+          # Move the runner script into the workspace so it can access the files
+          cp runner.py workspace/
+
+      - name: 🧠 Execute Render Pipeline
         run: |
           cd workspace
-          # ---------------------------------------------------------
-          # THIS IS THE COMPUTE PHASE
-          # 1. FFmpeg extracts frames from source_video.mp4
-          # 2. The temporal inpainting model processes the frames based on manifest.json
-          # 3. FFmpeg stitches it back together with audio
-          # ---------------------------------------------------------
-          
-          # Simulating the final output for the sake of the handoff
-          mkdir -p output
-          echo "Simulated video data" > output/final_healed.mp4
+          python runner.py
 
       - name: 📤 Secure Upload to Hugging Face
         env:
-          # Inject the encrypted secret into the runner environment
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Install the Hugging Face CLI
-          pip install -U "huggingface_hub[cli]"
-          
           # Upload the final video back to nookaharsha/temp
-          # It stores it under the specific Job ID folder so it doesn't overwrite anything
           huggingface-cli upload \
             nookaharsha/temp \
-            workspace/output/final_healed.mp4 \
+            workspace/final_healed.mp4 \
             ${{ github.event.client_payload.job_id }}/final_healed.mp4 \
             --repo-type dataset \
             --token $HF_TOKEN
             
-      - name: 🧹 Optional Bucket Cleanup
+      - name: 🧹 Bucket Cleanup
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # If you want to save space, delete the massive payload.zip from the bucket 
-          # now that the final video is uploaded.
+          # Delete the massive payload.zip from the bucket to keep storage clean
           huggingface-cli delete-file \
             ${{ github.event.client_payload.job_id }}.zip \
             --repo-id nookaharsha/temp \
