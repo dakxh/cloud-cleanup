@@ -1,0 +1,67 @@
+name: Spot Healing Cloud Runner
+
+on:
+  repository_dispatch:
+    types: [heal_video]
+
+jobs:
+  render-spot-healing:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip wget git git-lfs
+          python -m pip install --upgrade pip
+
+      - name: 🧠 Install AI Dependencies (CPU Optimized)
+        run: |
+          # Install CPU-only PyTorch to save massive amounts of time and space
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install opencv-python-headless numpy huggingface_hub scipy tqdm imageio einops
+          
+      - name: 📥 Clone ProPainter & Weights
+        run: |
+          # Clone the official repo
+          git clone https://github.com/sczhou/ProPainter.git
+          
+          # Download the required weights using Hugging Face CLI
+          cd ProPainter
+          mkdir -p weights
+          huggingface-cli download sczhou/ProPainter --local-dir weights
+
+      - name: 📥 Download User Payload
+        run: |
+          wget -O payload.zip "${{ github.event.client_payload.zip_url }}"
+          unzip payload.zip -d workspace/
+          cp runner.py workspace/
+
+      - name: 🎬 Execute ProPainter Pipeline
+        run: |
+          cd workspace
+          python runner.py
+
+      - name: 📤 Secure Upload Final Video
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli upload \
+            nookaharsha/temp \
+            workspace/final_healed.mp4 \
+            ${{ github.event.client_payload.job_id }}/final_healed.mp4 \
+            --repo-type dataset \
+            --token $HF_TOKEN
+            
+      - name: 🧹 Cleanup Staging Payload
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli delete-file \
+            ${{ github.event.client_payload.job_id }}.zip \
+            --repo-id nookaharsha/temp \
+            --repo-type dataset \
+            --token $HF_TOKEN
